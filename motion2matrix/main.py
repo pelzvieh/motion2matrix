@@ -7,7 +7,7 @@ from matrix_client import errors
 from matrix_client.client import MatrixClient
 from matrix_client.room import Room
 
-_config_directories = ("/var/lib/zabbix", Path.home(), Path.cwd())
+_config_directories = ("/etc/motion", Path.home(), Path.cwd())
 _config_filename = "matrix.conf"
 _config_string_section = "matrix"
 _config_string_username = "username"
@@ -50,33 +50,36 @@ def _read_config() -> str:
         return missing_key + " not set!"
 
 
-def _send_message(the_room: Room, zabbix_subject: str, zabbix_message: str):
+def _send_message(client: MatrixClient, the_room: Room, picture_filename: str, motion_message: str):
     """
 
     :param the_room: The room the message is being send to
     :type the_room: Room
-    :param zabbix_subject: Zabbix subject
-    :type zabbix_subject: str
-    :param zabbix_message: Zabbix's message
-    :type zabbix_message: str
+    :param picture_filename: name of file containing a picture of the detected motion
+    :type picture_filename: str
+    :param motion_message: A message describing the type of event from motion
+    :type motion_message: str
     :return:
     :rtype:
 
-    Sends the alerts to the room
+    Sends a motion notification including a picture to the room
     """
 
-    the_room.send_html(
-        "<b>{}</b><br /><br/ >{}".format(zabbix_subject, zabbix_message.replace('\n', '<br />'), "{}\n\n{}").format(
-            zabbix_subject, zabbix_message))
+    with open(picture_filename, "rb") as picture_file:
+        picture = picture_file.read()
+    picture_url = client.upload(picture, "image/jpg")
+
+    the_room.send_image(picture_url, picture_filename)
+    the_room.send_text(motion_message)
 
 
-def zabbix2matrixmain():
+def motion2matrixmain():
     if len(sys.argv) != 4:
-        print("Usage: {} <room(s)> <subject> <message>".format(sys.argv[0]))
+        print("Usage: {} <room(s)> <file path> <message>".format(sys.argv[0]))
         exit(1)
 
     the_rooms = re.split("[, ;]+", sys.argv[1].strip())
-    the_alert = sys.argv[2]
+    the_picture_filename = sys.argv[2]
     the_message = sys.argv[3]
 
     error = _read_config()
@@ -93,7 +96,7 @@ def zabbix2matrixmain():
 
         for room_id in the_rooms:
             the_room = client.join_room(room_id)
-            _send_message(the_room, the_alert, the_message)
+            _send_message(client, the_room, the_picture_filename, the_message)
 
         client.logout()
         exit(0)
@@ -103,4 +106,4 @@ def zabbix2matrixmain():
 
 
 if __name__ == '__main__':
-    zabbix2matrixmain()
+    motion2matrixmain()
