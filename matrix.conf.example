@@ -1,5 +1,5 @@
 [matrix]
-#username=@id:server
-#password= <password>
-#url=<homeserver, like https://matrix.org>
+username=@some_bot_name:matrix.example.com
+password=secret
+url=https://matrix.example.com
 

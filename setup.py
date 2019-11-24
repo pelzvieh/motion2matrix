@@ -1,16 +1,16 @@
 from setuptools import setup
 
 setup(
-    name='zabbixmatrix',
-    version='0.0.4',
-    packages=['zabbix2matrix'],
-    url='https://github.com/mnowiasz/zabbixmatrix',
+    name='motion2matrix',
+    version='0.0.1',
+    packages=['motion2matrix'],
+    url='https://github.com/pelzvieh/motion2matrix',
     license='MIT',
-    author='Mark Nowiasz',
-    author_email='buckaroo+zabbixmatrix@midworld.de',
-    description='Send zabbix alerts to matrix',
+    author='pelzvieh',
+    author_email='motion2matrix@flying-snail.de',
+    description='Send motion detection events to matrix',
     install_requires = ['matrix_client>=0.3.2'],
     entry_points = {
-        'console_scripts': ['zabbix2matrix=zabbix2matrix.main:zabbix2matrixmain'],
+        'console_scripts': ['motion2matrix=motion2matrix.main:motion2matrixmain'],
     },
 )

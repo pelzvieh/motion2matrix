@@ -103,3 +103,7 @@ venv.bak/
 # mypy
 .mypy_cache/
 .DS_Store
+
+# motion2matrix
+matrix.conf
+
