@@ -67,7 +67,7 @@ def _send_message(client: MatrixClient, the_room: Room, picture_filename: str, m
 
     with open(picture_filename, "rb") as picture_file:
         picture = picture_file.read()
-    picture_url = client.upload(picture, "image/jpg")
+    picture_url = client.upload(picture, "image/jpeg")
 
     the_room.send_image(picture_url, picture_filename)
     the_room.send_text(motion_message)
