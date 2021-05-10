@@ -1,11 +1,17 @@
 import configparser
+import logging
+import os
 import re
 import sys
 from pathlib import Path
+from typing import Iterable, Union
 
-from matrix_client import errors
-from matrix_client.client import MatrixClient
-from matrix_client.room import Room
+import aiofiles
+import aiofiles.os
+import magic
+from nio import (
+    AsyncClientConfig,
+    AsyncClient, UploadError, UploadResponse, Response, ErrorResponse, JoinError, LoginError, JoinResponse)
 
 _config_directories = ("/etc/motion", Path.home(), Path.cwd())
 _config_filename = "matrix.conf"
@@ -16,6 +22,10 @@ _config_string_url = "url"
 _config_strings = (_config_string_username, _config_string_password, _config_string_url)
 
 _config_values = {}
+
+DataT = Union[bytes, Iterable[bytes]]
+
+logger = logging.getLogger("motion2matrix")
 
 
 def _read_config() -> str:
@@ -50,11 +60,12 @@ def _read_config() -> str:
         return missing_key + " not set!"
 
 
-def _send_message(client: MatrixClient, the_room: Room, picture_filename: str, motion_message: str):
+async def _send_message(client: AsyncClient, room_id: str, picture_filename: str, motion_message: str,
+                        motion_link: str):
     """
 
-    :param the_room: The room the message is being send to
-    :type the_room: Room
+    :param room_id: The ID of the room the message is being send to
+    :type room_id: str
     :param picture_filename: name of file containing a picture of the detected motion
     :type picture_filename: str
     :param motion_message: A message describing the type of event from motion
@@ -65,22 +76,76 @@ def _send_message(client: MatrixClient, the_room: Room, picture_filename: str, m
     Sends a motion notification including a picture to the room
     """
 
-    with open(picture_filename, "rb") as picture_file:
-        picture = picture_file.read()
-    picture_url = client.upload(picture, "image/jpeg")
+    # 'application/pdf' "image/jpeg"
+    mime_type = magic.from_file(picture_filename, mime=True)
+    if not mime_type.startswith("image/"):
+        logger.debug(
+            f"Image file {picture_filename} does not have an image mime type. "
+            "Should be something like image/jpeg. "
+            f"Found mime type {mime_type}. "
+            "This image is being dropped and NOT sent."
+        )
+        return
+    async with aiofiles.open(picture_filename, "r+b") as f:
+        resp, decryption_keys = await client.upload(
+            data_provider=f,
+            content_type=mime_type,
+            filename=os.path.basename(picture_filename),
+            encrypt=True,
+        )
 
-    the_room.send_image(picture_url, picture_filename)
-    the_room.send_text(motion_message)
+    if isinstance(resp, UploadError):
+        logger.warning(f"Upload failed with {resp}")
+        return
+
+    if isinstance(resp, UploadResponse):
+        logger.debug(f"Result of upload is {resp}")
+
+    content = {
+        "body": picture_filename,  # descriptive title
+        "msgtype": "m.image",
+        "file": {
+            "url": resp.content_uri,
+            "key": decryption_keys["key"],
+            "iv": decryption_keys["iv"],
+            "hashes": decryption_keys["hashes"],
+            "v": decryption_keys["v"],
+        },
+    }
+
+    resp = await client.room_send(
+        room_id=room_id, message_type="m.room.message", content=content
+    )
+    if isinstance(resp, ErrorResponse):
+        logger.warning(f"Message to {room_id} failed with {resp}")
+
+    content_html = {
+        "body": f"{motion_message} Mehr...",
+        "msgtype": "m.text",
+        "format": "org.matrix.custom.html",
+        "formatted_body": f"<p>{motion_message}</p><p><small><a href=\"{motion_link}\">Mehr...</a></small></p>",
+
+    }
+
+    resp = await client.room_send(
+        room_id=room_id, message_type="m.room.message", content=content_html
+    )
+    if isinstance(resp, ErrorResponse):
+        logger.warning(f"Message to {room_id} failed with {resp}")
 
 
-def motion2matrixmain():
-    if len(sys.argv) != 4:
-        print("Usage: {} <room(s)> <file path> <message>".format(sys.argv[0]))
+async def motion2matrixmain():
+    if len(sys.argv) < 4 or len(sys.argv) > 5:
+        print("Usage: {} <room(s)> <file path> <message> [<additional url>]".format(sys.argv[0]))
         exit(1)
 
     the_rooms = re.split("[, ;]+", sys.argv[1].strip())
     the_picture_filename = sys.argv[2]
     the_message = sys.argv[3]
+    if len(sys.argv) == 5:
+        the_additional_link = sys.argv[4]
+    else:
+        the_additional_link = None
 
     error = _read_config()
 
@@ -90,20 +155,34 @@ def motion2matrixmain():
 
     client = None
     try:
-        client = MatrixClient(_config_values[_config_string_url])
-        token = client.login(username=_config_values[_config_string_username],
-                             password=_config_values[_config_string_password])
-
+        # Configuration options for the AsyncClient
+        client_config = AsyncClientConfig(
+            max_limit_exceeded=0,
+            max_timeouts=0,
+            store_sync_tokens=True,
+            encryption_enabled=False,
+        )
+        client = AsyncClient(homeserver=_config_values[_config_string_url],
+                             user=_config_values[_config_string_username],
+                             config=client_config,
+                             ssl=True
+                             )
+        resp = await client.login(password=_config_values[_config_string_password])
+        if isinstance(resp, LoginError):
+            logger.error(f"Could not login: {resp}")
+            return
+        await client.sync(30000, True)
         for room_id in the_rooms:
-            the_room = client.join_room(room_id)
-            _send_message(client, the_room, the_picture_filename, the_message)
+            resp = await client.join(room_id=room_id)
+            if isinstance(resp, JoinError):
+                logger.warning(f"Failed to join {room_id}: {resp}")
+                continue
+            if isinstance(resp, JoinResponse):
+                internal_room_id = resp.room_id
+                await _send_message(client, internal_room_id, the_picture_filename, the_message, the_additional_link)
 
-        client.logout()
+        await client.sync(3000, True)
+        await client.logout()
         exit(0)
-    except errors.MatrixRequestError as me:
-        print(me.content)
-        exit(1)
-
-
-if __name__ == '__main__':
-    motion2matrixmain()
+    finally:
+        await client.close()
