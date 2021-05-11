@@ -8,6 +8,7 @@ from typing import Iterable, Union
 
 import aiofiles
 import aiofiles.os
+import asyncio
 import magic
 from nio import (
     AsyncClientConfig,
@@ -134,10 +135,10 @@ async def _send_message(client: AsyncClient, room_id: str, picture_filename: str
         logger.warning(f"Message to {room_id} failed with {resp}")
 
 
-async def motion2matrixmain():
+async def _parseandpost():
     if len(sys.argv) < 4 or len(sys.argv) > 5:
-        print("Usage: {} <room(s)> <file path> <message> [<additional url>]".format(sys.argv[0]))
-        exit(1)
+        logger.error("Usage: {} <room(s)> <file path> <message> [<additional url>]".format(sys.argv[0]))
+        return
 
     the_rooms = re.split("[, ;]+", sys.argv[1].strip())
     the_picture_filename = sys.argv[2]
@@ -150,8 +151,8 @@ async def motion2matrixmain():
     error = _read_config()
 
     if error:
-        print(error)
-        exit(1)
+        logger.error(f"Error reading config: {error}")
+        return
 
     client = None
     try:
@@ -183,6 +184,15 @@ async def motion2matrixmain():
 
         await client.sync(3000, True)
         await client.logout()
-        exit(0)
+        return
     finally:
         await client.close()
+
+
+def motion2matrixmain():
+    sys.argv[0] = re.sub(r"(-script\.pyw|\.exe)?$", '', sys.argv[0])
+    asyncio.get_event_loop().run_until_complete(_parseandpost())
+
+
+if __name__ == '__main__':
+    motion2matrixmain()
