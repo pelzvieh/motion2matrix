@@ -13,6 +13,7 @@ import magic
 from nio import (
     AsyncClientConfig,
     AsyncClient, UploadError, UploadResponse, Response, ErrorResponse, JoinError, LoginError, JoinResponse)
+from os import path
 
 _config_directories = ("/etc/motion", Path.home(), Path.cwd())
 _config_filename = "matrix.conf"
@@ -87,12 +88,14 @@ async def _send_message(client: AsyncClient, room_id: str, picture_filename: str
             "This image is being dropped and NOT sent."
         )
         return
+    file_size = path.getsize(picture_filename)
     async with aiofiles.open(picture_filename, "r+b") as f:
         resp, decryption_keys = await client.upload(
             data_provider=f,
             content_type=mime_type,
             filename=os.path.basename(picture_filename),
             encrypt=True,
+            filesize=file_size,
         )
 
     if isinstance(resp, UploadError):
